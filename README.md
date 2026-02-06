@@ -42,3 +42,40 @@ npm run dev
 - `/settings` - Brand voice, usage stats, account
 - `/auth` - Sign in / sign up
 - `/pricing` - Detailed pricing with FAQ
+
+---
+
+## 🔗 Role in Curateria Ecosystem
+
+**ReviewReply is the Reputation Manager.**
+
+```
+ECOSYSTEM POSITION: Tier 2 — Tools 🛠️
+```
+
+### What It Does
+- AI-powered review response generation
+- Tone matching (professional, friendly, empathetic)
+- Brand voice customisation
+- Response history and analytics
+
+### How It Connects
+```
+Customer visits restaurant (via Curateria)
+     ↓
+Leaves review (Google, TripAdvisor)
+     ↓
+ReviewReply → generates perfect response
+     ↓
+Positive engagement → better reputation
+     ↓
+Higher ratings → better Curateria ranking
+```
+
+### Value to Ecosystem
+1. **Partner retention** — Free for Curateria partners
+2. **Reputation loop** — Good responses → better reviews → more discovery
+3. **Time savings** — Responses in seconds, not 30+ minutes
+4. **Consistency** — Every review gets a response, on-brand
+
+See: `/home/ernando_atsuda/projects/ECOSYSTEM.md` for full strategy.
