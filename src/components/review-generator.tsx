@@ -1,23 +1,34 @@
 "use client";
 
 import { useState, useRef } from "react";
+import Link from "next/link";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { StarRating } from "@/components/star-rating";
 import { ToneSelector } from "@/components/tone-selector";
 import { Card, CardContent } from "@/components/ui/card";
-import { Copy, Check, Sparkles, Loader2 } from "lucide-react";
+import { Copy, Check, Sparkles, Loader2, Crown, AlertTriangle } from "lucide-react";
 import type { Tone } from "@/lib/ai";
 
 interface ReviewGeneratorProps {
-  onSave?: (data: { review: string; rating: number; tone: Tone; response: string }) => void;
+  onSave?: (data?: { review: string; rating: number; tone: Tone; response: string }) => void;
   restaurantName?: string;
   brandVoice?: string;
   isDemo?: boolean;
   demoUsesLeft?: number;
+  usageRemaining?: number;
+  isPro?: boolean;
 }
 
-export function ReviewGenerator({ onSave, restaurantName, brandVoice, isDemo, demoUsesLeft }: ReviewGeneratorProps) {
+export function ReviewGenerator({
+  onSave,
+  restaurantName,
+  brandVoice,
+  isDemo,
+  demoUsesLeft,
+  usageRemaining,
+  isPro,
+}: ReviewGeneratorProps) {
   const [review, setReview] = useState("");
   const [rating, setRating] = useState(5);
   const [tone, setTone] = useState<Tone>("professional");
@@ -25,6 +36,7 @@ export function ReviewGenerator({ onSave, restaurantName, brandVoice, isDemo, de
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
+  const [limitReached, setLimitReached] = useState(false);
   const responseRef = useRef<HTMLDivElement>(null);
 
   const generate = async () => {
@@ -32,6 +44,7 @@ export function ReviewGenerator({ onSave, restaurantName, brandVoice, isDemo, de
     setLoading(true);
     setResponse("");
     setError("");
+    setLimitReached(false);
 
     try {
       const res = await fetch("/api/generate", {
@@ -42,6 +55,9 @@ export function ReviewGenerator({ onSave, restaurantName, brandVoice, isDemo, de
 
       if (!res.ok) {
         const data = await res.json();
+        if (data.limitReached) {
+          setLimitReached(true);
+        }
         throw new Error(data.error || "Failed to generate response");
       }
 
@@ -59,7 +75,8 @@ export function ReviewGenerator({ onSave, restaurantName, brandVoice, isDemo, de
         }
       }
 
-      onSave?.({ review, rating, tone, response: full });
+      // Notify parent to refresh data (for dashboard)
+      onSave?.();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -72,6 +89,10 @@ export function ReviewGenerator({ onSave, restaurantName, brandVoice, isDemo, de
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const canGenerate = isDemo
+    ? (demoUsesLeft ?? 0) > 0
+    : isPro || (usageRemaining ?? Infinity) > 0;
 
   return (
     <div className="space-y-6">
@@ -97,7 +118,7 @@ export function ReviewGenerator({ onSave, restaurantName, brandVoice, isDemo, de
 
       <Button
         onClick={generate}
-        disabled={loading || !review.trim()}
+        disabled={loading || !review.trim() || !canGenerate}
         size="lg"
         className="w-full"
       >
@@ -113,11 +134,35 @@ export function ReviewGenerator({ onSave, restaurantName, brandVoice, isDemo, de
             {isDemo && demoUsesLeft !== undefined && (
               <span className="ml-2 text-xs opacity-70">({demoUsesLeft} free left)</span>
             )}
+            {!isDemo && !isPro && usageRemaining !== undefined && (
+              <span className="ml-2 text-xs opacity-70">({usageRemaining} left)</span>
+            )}
           </>
         )}
       </Button>
 
-      {error && (
+      {/* Limit reached banner */}
+      {(limitReached || (!canGenerate && !isDemo)) && (
+        <div className="p-4 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-medium">Monthly limit reached</p>
+              <p className="text-sm opacity-80 mt-1">
+                You&apos;ve used all 10 free responses this month. Upgrade to Pro for unlimited access!
+              </p>
+              <Link href="/pricing">
+                <Button size="sm" className="mt-3">
+                  <Crown className="h-4 w-4 mr-2" />
+                  Upgrade to Pro - $19/month
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {error && !limitReached && (
         <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
           {error}
         </div>

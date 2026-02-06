@@ -1,10 +1,14 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { Navbar } from "@/components/navbar";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CheckCircle2, X } from "lucide-react";
+import { CheckCircle2, X, Loader2, AlertTriangle } from "lucide-react";
+import type { User } from "@supabase/supabase-js";
 
 const plans = [
   {
@@ -13,18 +17,20 @@ const plans = [
     period: "forever",
     desc: "Perfect for trying out ReviewReply.ai",
     features: [
-      { text: "5 responses per day", included: true },
+      { text: "10 responses per month", included: true },
       { text: "All 4 tone options", included: true },
       { text: "Copy to clipboard", included: true },
-      { text: "Brand voice customization", included: false },
-      { text: "Response history", included: false },
-      { text: "API access", included: false },
+      { text: "Brand voice customization", included: true },
+      { text: "Response history", included: true },
+      { text: "Priority support", included: false },
     ],
     cta: "Get Started",
+    ctaLink: "/auth",
     highlighted: false,
+    checkout: false,
   },
   {
-    name: "Starter",
+    name: "Pro",
     price: "$19",
     period: "/month",
     desc: "For restaurant owners who are serious about reputation",
@@ -36,31 +42,60 @@ const plans = [
       { text: "Response history", included: true },
       { text: "Priority support", included: true },
     ],
-    cta: "Start Free Trial",
+    cta: "Upgrade Now",
+    ctaLink: null,
     highlighted: true,
-  },
-  {
-    name: "Pro",
-    price: "$39",
-    period: "/month",
-    desc: "For teams managing multiple locations",
-    features: [
-      { text: "Everything in Starter", included: true },
-      { text: "Team accounts (5 seats)", included: true },
-      { text: "API access", included: true },
-      { text: "Analytics dashboard", included: true },
-      { text: "Custom tone creation", included: true },
-      { text: "Dedicated support", included: true },
-    ],
-    cta: "Start Free Trial",
-    highlighted: false,
+    checkout: true,
   },
 ];
 
 export default function PricingPage() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState<string | null>(null);
+  const searchParams = useSearchParams();
+  const supabase = createClient();
+
+  const cancelled = searchParams.get("cancelled") === "true";
+
+  useEffect(() => {
+    const checkUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUser(user);
+    };
+    checkUser();
+  }, []);
+
+  const handleCheckout = async (planName: string) => {
+    if (!user) {
+      // Redirect to auth first
+      window.location.href = "/auth?redirect=/pricing";
+      return;
+    }
+
+    setLoading(planName);
+    try {
+      const res = await fetch("/api/stripe/checkout", { method: "POST" });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        console.error("Checkout error:", data.error);
+      }
+    } catch (err) {
+      console.error("Checkout error:", err);
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+  };
+
   return (
     <div className="min-h-screen">
-      <Navbar />
+      <Navbar user={user} onSignOut={handleSignOut} />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
         <div className="text-center mb-16">
@@ -72,7 +107,17 @@ export default function PricingPage() {
           </p>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+        {/* Cancelled Banner */}
+        {cancelled && (
+          <div className="max-w-md mx-auto mb-8 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5" />
+              <p>Checkout was cancelled. No worries, you can try again anytime!</p>
+            </div>
+          </div>
+        )}
+
+        <div className="grid md:grid-cols-2 gap-8 max-w-3xl mx-auto">
           {plans.map((plan) => (
             <Card
               key={plan.name}
@@ -108,15 +153,31 @@ export default function PricingPage() {
                     </li>
                   ))}
                 </ul>
-                <Link href="/auth">
+                {plan.checkout ? (
                   <Button
                     variant={plan.highlighted ? "default" : "outline"}
                     className="w-full"
                     size="lg"
+                    onClick={() => handleCheckout(plan.name)}
+                    disabled={loading === plan.name}
                   >
-                    {plan.cta}
+                    {loading === plan.name ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      plan.cta
+                    )}
                   </Button>
-                </Link>
+                ) : (
+                  <Link href={plan.ctaLink!}>
+                    <Button
+                      variant={plan.highlighted ? "default" : "outline"}
+                      className="w-full"
+                      size="lg"
+                    >
+                      {plan.cta}
+                    </Button>
+                  </Link>
+                )}
               </CardContent>
             </Card>
           ))}
@@ -129,7 +190,7 @@ export default function PricingPage() {
             {[
               {
                 q: "Can I try it before paying?",
-                a: "Absolutely! You get 3 free tries on the homepage without even signing up, plus 5 free responses per day on the Free plan.",
+                a: "Absolutely! You get 3 free tries on the homepage without even signing up, plus 10 free responses per month on the Free plan.",
               },
               {
                 q: "What AI model do you use?",
@@ -137,7 +198,7 @@ export default function PricingPage() {
               },
               {
                 q: "Can I customize the response style?",
-                a: "Yes! On Starter and Pro plans, you can configure your brand voice with your restaurant name, style notes, and preferred phrases.",
+                a: "Yes! Both Free and Pro plans include brand voice customization. Set your restaurant name and style notes.",
               },
               {
                 q: "Do you support multiple languages?",
@@ -146,6 +207,10 @@ export default function PricingPage() {
               {
                 q: "Can I cancel anytime?",
                 a: "Yes, cancel anytime. No questions asked. Your account will remain active until the end of your billing period.",
+              },
+              {
+                q: "What happens when I reach my limit?",
+                a: "On the Free plan, you'll see a prompt to upgrade. Your history and settings are preserved. Upgrade anytime to continue.",
               },
             ].map(({ q, a }) => (
               <div key={q} className="glass rounded-xl p-6">

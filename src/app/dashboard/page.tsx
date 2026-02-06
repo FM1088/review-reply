@@ -2,12 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { ReviewGenerator } from "@/components/review-generator";
 import { Navbar } from "@/components/navbar";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Star, Copy, Check, Trash2, Clock } from "lucide-react";
+import { Star, Copy, Check, Trash2, Clock, Zap, Crown } from "lucide-react";
 import type { Tone } from "@/lib/ai";
 import type { User } from "@supabase/supabase-js";
 
@@ -20,50 +21,95 @@ interface HistoryItem {
   created_at: string;
 }
 
+interface UsageData {
+  plan: string;
+  monthlyUsage: number;
+  monthlyLimit: number;
+  remaining: number;
+  totalResponses: number;
+}
+
 export default function DashboardPage() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [settings, setSettings] = useState<{ restaurant_name?: string; brand_voice?: string }>({});
+  const [usage, setUsage] = useState<UsageData | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const router = useRouter();
   const supabase = createClient();
 
+  const loadData = async (userId: string) => {
+    // Load history from Supabase
+    const { data: responses } = await supabase
+      .from("responses")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (responses) {
+      setHistory(responses as HistoryItem[]);
+    }
+
+    // Load profile settings
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("restaurant_name, brand_voice")
+      .eq("id", userId)
+      .single();
+
+    if (profile) {
+      setSettings({
+        restaurant_name: profile.restaurant_name || undefined,
+        brand_voice: profile.brand_voice || undefined,
+      });
+    }
+
+    // Load usage stats
+    const usageRes = await fetch("/api/usage");
+    if (usageRes.ok) {
+      const usageData = await usageRes.json();
+      setUsage(usageData);
+    }
+  };
+
   useEffect(() => {
     const init = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { router.push("/auth"); return; }
+      if (!user) {
+        router.push("/auth");
+        return;
+      }
       setUser(user);
-
-      // Load history from localStorage (or Supabase in production)
-      const saved = localStorage.getItem(`rr_history_${user.id}`);
-      if (saved) setHistory(JSON.parse(saved));
-
-      const savedSettings = localStorage.getItem(`rr_settings_${user.id}`);
-      if (savedSettings) setSettings(JSON.parse(savedSettings));
-
+      await loadData(user.id);
       setLoading(false);
     };
     init();
   }, []);
 
-  const handleSave = (data: { review: string; rating: number; tone: Tone; response: string }) => {
-    if (!user) return;
-    const item: HistoryItem = {
-      id: Date.now().toString(),
-      ...data,
-      created_at: new Date().toISOString(),
-    };
-    const updated = [item, ...history].slice(0, 50);
-    setHistory(updated);
-    localStorage.setItem(`rr_history_${user.id}`, JSON.stringify(updated));
+  const handleGenerated = async () => {
+    // Reload history and usage after generating
+    if (user) {
+      await loadData(user.id);
+    }
   };
 
-  const deleteItem = (id: string) => {
+  const deleteItem = async (id: string) => {
     if (!user) return;
-    const updated = history.filter((h) => h.id !== id);
-    setHistory(updated);
-    localStorage.setItem(`rr_history_${user.id}`, JSON.stringify(updated));
+    
+    await supabase.from("responses").delete().eq("id", id);
+    setHistory(history.filter((h) => h.id !== id));
+    
+    // Update usage count
+    if (usage) {
+      setUsage({
+        ...usage,
+        monthlyUsage: Math.max(0, usage.monthlyUsage - 1),
+        remaining: usage.plan === "pro" ? Infinity : usage.remaining + 1,
+        totalResponses: usage.totalResponses - 1,
+      });
+    }
   };
 
   const copyResponse = async (id: string, text: string) => {
@@ -85,11 +131,61 @@ export default function DashboardPage() {
     );
   }
 
+  const isPro = usage?.plan === "pro";
+  const usagePercent = usage ? Math.min(100, (usage.monthlyUsage / usage.monthlyLimit) * 100) : 0;
+
   return (
     <div className="min-h-screen">
       <Navbar user={user} onSignOut={handleSignOut} />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Usage Banner */}
+        <Card className="glass mb-8">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                {isPro ? (
+                  <div className="flex items-center gap-2 text-primary">
+                    <Crown className="h-5 w-5" />
+                    <span className="font-semibold">Pro Plan</span>
+                    <span className="text-muted-foreground text-sm">• Unlimited responses</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <Zap className="h-5 w-5 text-primary" />
+                      <span className="font-semibold">Free Plan</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-32 h-2 bg-secondary rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary transition-all"
+                          style={{ width: `${usagePercent}%` }}
+                        />
+                      </div>
+                      <span className="text-sm text-muted-foreground">
+                        {usage?.remaining === 0 ? (
+                          <span className="text-red-400">No uses left</span>
+                        ) : (
+                          <>{usage?.remaining} of {usage?.monthlyLimit} left this month</>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+              {!isPro && (
+                <Link href="/pricing">
+                  <Button size="sm" variant="outline">
+                    <Crown className="h-4 w-4 mr-2" />
+                    Upgrade to Pro
+                  </Button>
+                </Link>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
         <div className="grid lg:grid-cols-5 gap-8">
           {/* Generator */}
           <div className="lg:col-span-3">
@@ -97,9 +193,11 @@ export default function DashboardPage() {
             <Card className="glass">
               <CardContent className="p-6">
                 <ReviewGenerator
-                  onSave={handleSave}
+                  onSave={handleGenerated}
                   restaurantName={settings.restaurant_name}
                   brandVoice={settings.brand_voice}
+                  usageRemaining={usage?.remaining}
+                  isPro={isPro}
                 />
               </CardContent>
             </Card>
